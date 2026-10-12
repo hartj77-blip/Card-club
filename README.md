@@ -41,9 +41,7 @@ One-time setup:
 3. Merge this code into the default branch. The workflow builds, tests and deploys on every
    push there. You can also run it by hand from the Actions tab.
 
-The site appears at `https://<your-username>.github.io/<repo-name>/`. The golf game is
-included at `/golf.html`, and the Bunker Nine zombies game (solo or 1–4 player co-op with
-voice chat, using the same peer-to-peer rooms) at `/zombies.html`.
+The site appears at `https://<your-username>.github.io/card-club/`.
 
 Things to know about this mode:
 
@@ -62,7 +60,6 @@ Build it locally with `npm run build:web`. The output goes to `dist-web/`.
 You need [Node.js](https://nodejs.org) 18 or newer.
 
 ```bash
-cd card-club
 npm install
 npm start          # http://localhost:3000
 ```
@@ -79,8 +76,7 @@ pick the repo. It reads `render.yaml` at the repo root and gives you a public UR
   reset too. To keep them, add a persistent disk (paid plan) and set the `DATA_DIR`
   environment variable to its mount path.
 
-**Any other Node host** (Railway, Fly.io, a VPS, etc.): run `npm install && npm start` in
-`card-club/`. The server listens on `$PORT` (default 3000), and the host must support
+**Any other Node host** (Railway, Fly.io, a VPS, etc.): run `npm install && npm start`. The server listens on `$PORT` (default 3000), and the host must support
 WebSockets.
 
 ## How it works
