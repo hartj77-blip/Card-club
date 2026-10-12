@@ -1,6 +1,6 @@
 # Card Club ♠♥♦♣
 
-A browser card room for you and your friends. One person creates a room, sends the
+A browser card (and dice) room for you and your friends. One person creates a room, sends the
 invite link, and everyone plays together in real time on desktop or phone. No sign-up needed.
 
 **Games**
@@ -11,6 +11,7 @@ invite link, and everyone plays together in real time on desktop or phone. No si
 | Spades | 4 (two teams) | Nil bids, bags (10 = −100), spades must be broken, play to 500 (adjustable) |
 | Gin Rummy | 2 | Melds and deadwood counted for you; knock, gin, big gin, undercuts, layoffs, game and box bonuses |
 | Blackjack | 1–7 vs. the house | Double, split, 3:2 blackjack, dealer stands on all 17s |
+| Yahtzee | 1–6 | Hold dice between rolls, live scorecard with score previews, upper bonus, Yahtzee bonuses and joker rule |
 
 **Room features**
 

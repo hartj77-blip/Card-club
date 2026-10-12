@@ -326,7 +326,7 @@
           ${busy ? `<p class="status-line">${esc(S.status)}${S.status.startsWith('Waiting') || S.status.startsWith('Connecting') ? ' <a href="#" id="cancel-join" class="muted">Cancel</a>' : ''}</p>` : ''}
           ${S.error && !busy ? `<p class="error-line">${esc(S.error)}</p>` : ''}
           ${P2P && !joining ? '<p class="muted" style="font-size:13px;margin:16px 0 0">Creating a room makes this tab the game host. Keep it open while you play.</p>' : ''}
-          <div class="game-list"><span>Texas Hold'em</span><span>Spades</span><span>Gin Rummy</span><span>Blackjack</span></div>
+          <div class="game-list"><span>Texas Hold'em</span><span>Spades</span><span>Gin Rummy</span><span>Blackjack</span><span>Yahtzee</span></div>
         </div>
       </div>`;
     const nameEl = document.getElementById('name');
@@ -428,7 +428,7 @@
   }
 
   // ---------- lobby ----------
-  const GAME_SUIT = { holdem: '♠', spades: '♣', ginrummy: '♦', blackjack: '♥' };
+  const GAME_SUIT = { holdem: '♠', spades: '♣', ginrummy: '♦', blackjack: '♥', yahtzee: '⚄' };
 
   function lobbyHTML() {
     const r = S.room;
@@ -929,7 +929,84 @@
     return '';
   }
 
-  const RENDER = { holdem: holdemHTML, spades: spadesHTML, ginrummy: ginHTML, blackjack: blackjackHTML };
+
+  // ---------- Yahtzee ----------
+  const PIPS = { 1: [4], 2: [0, 8], 3: [0, 4, 8], 4: [0, 2, 6, 8], 5: [0, 2, 4, 6, 8], 6: [0, 2, 3, 5, 6, 8] };
+  function dieHTML(value, cls, attrs) {
+    const cells = Array.from({ length: 9 }, (_, i) => `<span class="${PIPS[value].includes(i) ? 'pip-dot' : ''}"></span>`).join('');
+    return `<button class="die ${cls}" ${attrs} aria-label="Die showing ${value}">${cells}</button>`;
+  }
+
+  function yahtzeeHTML(v) {
+    const me = v.mySeat;
+    const myTurn = me >= 0 && v.turn === me && !v.over;
+    const rolled = v.rollsLeft < 3;
+    const canHold = myTurn && rolled && v.rollsLeft > 0;
+    const freshRoll = S.ui.yRollNo !== v.rollNo;
+    S.ui.yRollNo = v.rollNo;
+    const current = v.players[v.turn];
+
+    const dice = v.dice.map((d, i) => {
+      const cls = [
+        v.held[i] && rolled ? 'held' : '',
+        !rolled ? 'idle' : '',
+        freshRoll && rolled && !v.held[i] ? 'rolling' : '',
+        canHold ? 'click' : '',
+      ].join(' ');
+      return dieHTML(d, cls, canHold ? `data-a="y-hold" data-i="${i}"` : 'disabled');
+    }).join('');
+
+    let status;
+    if (v.over) status = '';
+    else if (myTurn) status = !rolled ? 'Your turn: roll the dice' : v.rollsLeft > 0 ? 'Tap dice to keep them, then roll again, or pick a box to score' : 'Pick a box to score';
+    else status = `${esc(current.name)}'s turn${rolled ? ` · ${v.rollsLeft} roll${v.rollsLeft === 1 ? '' : 's'} left` : ''}`;
+
+    const controls = myTurn ? `
+      <div class="row" style="justify-content:center">
+        <button class="btn primary big" data-a="y-roll" ${v.rollsLeft > 0 ? '' : 'disabled'}>${!rolled ? '🎲 Roll' : v.rollsLeft > 0 ? `🎲 Roll again (${v.rollsLeft} left)` : 'No rolls left'}</button>
+      </div>` : '';
+
+    // Scorecard: one column per player; the current player's open boxes show what they'd score.
+    const head = v.players.map((p, i) => `<th class="${i === v.turn && !v.over ? 'yz-turn' : ''}" data-voice-id="${p.id}">${member(p.id).isBot ? '🤖 ' : ''}${esc(p.name)}${i === me ? '<div class="muted" style="font-size:11px;font-weight:400">you</div>' : ''}</th>`).join('');
+    const cell = (p, i, cat) => {
+      const val = p.card[cat];
+      const just = v.last && v.last.seat === i && v.last.category === cat ? 'just' : '';
+      if (val !== null) return `<td class="num ${just}">${val}</td>`;
+      if (i === v.turn && v.preview && cat in v.preview) {
+        const pts = v.preview[cat];
+        if (myTurn) return `<td class="num"><button class="yz-pick ${pts ? '' : 'zero'}" data-a="y-score" data-cat="${cat}">${pts}</button></td>`;
+        return `<td class="num yz-preview">${pts}</td>`;
+      }
+      return '<td class="num"></td>';
+    };
+    const rows = (cats) => cats.map((cat) => `<tr><td>${v.labels[cat]}</td>${v.players.map((p, i) => cell(p, i, cat)).join('')}</tr>`).join('');
+    const sumRow = (label, fn, cls = '') => `<tr class="${cls}"><td>${label}</td>${v.players.map((p) => `<td class="num">${fn(p)}</td>`).join('')}</tr>`;
+    const card = `
+      <div class="yz-wrap">
+        <table class="yz-card">
+          <thead><tr><th></th>${head}</tr></thead>
+          <tbody>
+            ${rows(v.upper)}
+            ${sumRow(`Upper (${v.bonusAt} for bonus)`, (p) => `${p.totals.upper}`, 'yz-sub')}
+            ${sumRow('Bonus +35', (p) => (p.totals.bonus ? '35' : ''), 'yz-sub')}
+            ${rows(v.lower)}
+            ${sumRow('Yahtzee bonus', (p) => (p.totals.yahtzeeBonus ? p.totals.yahtzeeBonus : ''), 'yz-sub')}
+            ${sumRow('Total', (p) => `<b>${p.totals.total}</b>`, 'yz-total')}
+          </tbody>
+        </table>
+      </div>`;
+
+    return `
+      <div class="muted" style="text-align:center;font-size:12px">Round ${v.round} of 13</div>
+      <div class="yz-tray">
+        <div class="dice-row">${dice}</div>
+        <div class="yz-status">${status}</div>
+        ${controls}
+      </div>
+      ${card}`;
+  }
+
+  const RENDER = { holdem: holdemHTML, spades: spadesHTML, ginrummy: ginHTML, blackjack: blackjackHTML, yahtzee: yahtzeeHTML };
 
   function afterStage() {
     applySpeaking();
@@ -1105,6 +1182,10 @@
       case 'bj-double': act({ type: 'double' }); break;
       case 'bj-split': act({ type: 'split' }); break;
       case 'bj-leave': if (confirm('Leave the blackjack table?')) act({ type: 'leave' }); break;
+      // yahtzee
+      case 'y-roll': act({ type: 'roll' }); break;
+      case 'y-hold': act({ type: 'hold', index: Number(d.i) }); break;
+      case 'y-score': act({ type: 'score', category: d.cat }); break;
       default: break;
     }
   });
