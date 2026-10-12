@@ -7,9 +7,9 @@ const spades = require('../server/games/spades');
 const gin = require('../server/games/ginrummy');
 const blackjack = require('../server/games/blackjack');
 const yahtzee = require('../server/games/yahtzee');
-const roulette = require('../server/games/roulette');
-const craps = require('../server/games/craps');
-const threecard = require('../server/games/threecard');
+const hearts = require('../server/games/hearts');
+const solitaire = require('../server/games/solitaire');
+const war = require('../server/games/war');
 const { newDeck } = require('../server/cards');
 
 let passed = 0;
@@ -321,73 +321,94 @@ test('bots finish 60 three-player games with sensible scores', () => {
   assert(total / 180 > 190, `bots average only ${(total / 180).toFixed(0)}`);
 });
 
-console.log('Casino tables');
-// Run a table with bots for a while; every chip must be accounted for between players and the house.
-function runTable(mod, opts, rounds, extraActors) {
-  const ids = ['a', 'b', 'c'];
-  const chips = {};
-  ids.forEach((i) => { chips[i] = 5000; });
-  const ctx = makeCtx(chips);
-  const s = mod.create(ids.map((id) => ({ id, name: id })), opts, ctx);
-  let n = 0;
-  for (let step = 0; step < rounds * 40 && n < rounds; step++) {
-    const w = mod.waitingOn(s);
-    const opt = extraActors ? mod.optionalActors(s) : [];
-    const who = opt[0] || w[0];
-    if (!who) { n++; mod.act(s, 'a', { type: 'next' }, ctx); continue; }
-    const a = mod.autoAction(s, who, true, ctx);
-    if (!a) { n++; continue; }
-    mod.act(s, who, a, ctx);
-    if (a.type === 'roll') n++;
-    for (const v of Object.values(chips)) assert(v >= 0, 'negative chips');
+console.log('Hearts, Solitaire, War');
+test('hearts: 100 bot games finish, every hand is worth 26', () => {
+  const ctx = makeCtx({});
+  for (let g = 0; g < 100; g++) {
+    const s = hearts.create(['a', 'b', 'c', 'd'].map((id) => ({ id, name: id })), { target: 100 }, ctx);
+    for (let i = 0; i < 20000 && !s.over; i++) {
+      const w = hearts.waitingOn(s);
+      if (!w.length) { hearts.act(s, 'a', { type: 'next' }, ctx); continue; }
+      hearts.act(s, w[0], hearts.autoAction(s, w[0]), ctx);
+    }
+    assert(s.over, 'game did not finish');
+    for (const h of s.history) {
+      assert.strictEqual(h.taken.reduce((x, y) => x + y, 0), 26);
+      assert.strictEqual(h.delta.reduce((x, y) => x + y, 0), h.shooter >= 0 ? 78 : 26);
+    }
   }
-  return { s, chips, ctx };
-}
-test('roulette: bots play 300 spins; refunds on early end', () => {
-  const { s, chips, ctx } = runTable(roulette, { minBet: 5, maxBet: 500, doubleZero: 1 }, 300);
-  assert(s.history.length > 0);
-  if (s.phase === 'spun') roulette.act(s, 'a', { type: 'next' }, ctx);
-  roulette.act(s, 'a', { type: 'clear' }, ctx);
-  const before = chips.a;
-  roulette.act(s, 'a', { type: 'bet', kind: 'red', amount: 50 }, ctx);
-  assert.strictEqual(chips.a, before - 50);
-  roulette.abort(s, ctx);
-  assert.strictEqual(chips.a, before, 'bet not refunded');
 });
-test('roulette: straight-up pays 35 to 1', () => {
-  const chips = { a: 1000 };
-  const ctx = makeCtx(chips);
-  const s = roulette.create([{ id: 'a', name: 'a' }], { minBet: 5, maxBet: 500, doubleZero: 0 }, ctx);
-  for (let n = 0; n <= 36; n++) roulette.act(s, 'a', { type: 'bet', kind: 'straight', value: n, amount: 10 }, ctx);
-  roulette.act(s, 'a', { type: 'spin' }, ctx);
-  assert.strictEqual(chips.a, 1000 - 370 + 360, 'covering every number should lose exactly one unit');
+test('hearts: 2 of clubs leads, no points on trick one, hearts must be broken', () => {
+  const ctx = makeCtx({});
+  const s = hearts.create(['a', 'b', 'c', 'd'].map((id) => ({ id, name: id })), { target: 100 }, ctx);
+  const r = s.round;
+  r.phase = 'playing';
+  r.hands = [['2C', '3H', '4D'], ['QS', 'AH', '9D'], ['5C', '6C', '7C'], ['8C', '9C', 'KH']];
+  r.turn = 0;
+  r.trickNo = 0;
+  assert.deepStrictEqual(hearts.legalCards(s, 0), ['2C']);
+  hearts.act(s, 'a', { type: 'play', card: '2C' }, ctx);
+  // Seat 1 is void in clubs but can't dump points on the first trick.
+  assert.deepStrictEqual(hearts.legalCards(s, 1), ['9D']);
+  // Later, hearts can't be led until broken (unless that's all you have).
+  r.trick = []; r.trickNo = 1; r.turn = 3; r.hands[3] = ['KH', '9C'];
+  assert.deepStrictEqual(hearts.legalCards(s, 3), ['9C']);
 });
-test('craps: bots play 400 rolls; pass line and odds pay correctly', () => {
-  runTable(craps, { minBet: 5, maxBet: 500 }, 400, true);
-  const chips = { a: 1000 };
-  const ctx = makeCtx(chips);
-  const s = craps.create([{ id: 'a', name: 'a' }], { minBet: 5, maxBet: 500 }, ctx);
-  craps.act(s, 'a', { type: 'bet', spot: 'pass', amount: 10 }, ctx);
-  assert.throws(() => craps.act(s, 'a', { type: 'bet', spot: 'passOdds', amount: 10 }, ctx), /only open once a point/);
-  s.point = 4; // pretend a 4 was rolled
-  craps.act(s, 'a', { type: 'bet', spot: 'passOdds', amount: 30 }, ctx);
-  assert.throws(() => craps.act(s, 'a', { type: 'bet', spot: 'passOdds', amount: 5 }, ctx), /limited to 3x/);
-  // Force the point: 10 line pays 10, 30 odds on 4 pay 2:1 = 60.
-  const crypto = require('crypto');
-  const realRandomInt = crypto.randomInt;
-  crypto.randomInt = () => 1; // both dice show 2
-  try { craps.act(s, 'a', { type: 'roll' }, ctx); } finally { crypto.randomInt = realRandomInt; }
-  assert.strictEqual(chips.a, 1000 + 10 + 60);
-  assert.strictEqual(s.point, null);
+test('hearts: shooting the moon gives everyone else 26', () => {
+  const ctx = makeCtx({});
+  const s = hearts.create(['a', 'b', 'c', 'd'].map((id) => ({ id, name: id })), { target: 100 }, ctx);
+  const r = s.round;
+  r.phase = 'playing';
+  r.hands = [['AH'], ['2C'], ['3C'], ['4C']];
+  r.taken = [25, 0, 0, 0]; // queen of spades (13) and 12 hearts already
+  r.trickNo = 12; r.turn = 0; r.trick = [];
+  r.heartsBroken = true;
+  for (const [id, c] of [['a', 'AH'], ['b', '2C'], ['c', '3C'], ['d', '4C']]) hearts.act(s, id, { type: 'play', card: c }, ctx);
+  assert.deepStrictEqual(s.scores, [0, 26, 26, 26]);
 });
-test('three card poker: exact hand counts and bots play 500 hands', () => {
-  const d = newDeck();
-  const cnt = [0, 0, 0, 0, 0, 0];
-  for (let i = 0; i < 52; i++) for (let j = i + 1; j < 52; j++) for (let k = j + 1; k < 52; k++) cnt[threecard.score3([d[i], d[j], d[k]])[0]]++;
-  assert.deepStrictEqual(cnt, [16440, 3744, 1096, 720, 52, 48]);
-  assert(threecard.qualifies(threecard.score3(['QS', '7H', '2D'])));
-  assert(!threecard.qualifies(threecard.score3(['JS', '9H', '2D'])));
-  runTable(threecard, { minBet: 10, maxBet: 500 }, 500);
+test('solitaire: legal moves, undo, and no cards lost over 300 auto-played deals', () => {
+  assert(solitaire.canTableau({ cards: ['8H'], up: 0 }, '7S'));
+  assert(!solitaire.canTableau({ cards: ['8H'], up: 0 }, '7D'));
+  assert(solitaire.canTableau({ cards: [], up: 0 }, 'KC'));
+  assert(!solitaire.canTableau({ cards: [], up: 0 }, 'QC'));
+  for (let g = 0; g < 300; g++) {
+    const s = solitaire.create([{ id: 'a', name: 'a' }], { draw: g % 2 ? 3 : 1 });
+    for (let i = 0; i < 400 && !s.over; i++) {
+      let moved = false;
+      for (let p = 0; p < 7 && !moved; p++) {
+        const pile = s.tableau[p];
+        if (!pile.cards.length) continue;
+        const from = { type: 'tableau', pile: p, index: pile.cards.length - 1 };
+        const to = solitaire.autoDestination(s, from);
+        if (to && to.type === 'foundation') { solitaire.act(s, 'a', { type: 'move', from, to }); moved = true; }
+      }
+      if (!moved) {
+        try { solitaire.act(s, 'a', { type: 'draw' }); } catch { solitaire.act(s, 'a', { type: 'resign' }); }
+      }
+      const all = [...s.stock, ...s.waste, ...Object.values(s.foundations).flat(), ...s.tableau.flatMap((x) => x.cards)];
+      assert.strictEqual(new Set(all).size, 52);
+    }
+    if (!s.over) solitaire.act(s, 'a', { type: 'resign' });
+    assert(s.over.summary.includes('a '));
+  }
+  const s = solitaire.create([{ id: 'a', name: 'a' }], { draw: 1 });
+  const before = JSON.stringify(s.tableau);
+  solitaire.act(s, 'a', { type: 'draw' });
+  solitaire.act(s, 'a', { type: 'undo' });
+  assert.strictEqual(JSON.stringify(s.tableau), before);
+  assert.strictEqual(s.stock.length, 24);
+  assert.throws(() => solitaire.act(s, 'someone-else', { type: 'draw' }), /watching/);
+});
+test('war: 500 games keep all 52 cards and always finish', () => {
+  const ctx = makeCtx({});
+  for (let g = 0; g < 500; g++) {
+    const s = war.create([{ id: 'a', name: 'a' }, { id: 'b', name: 'b' }], { maxRounds: 300 }, ctx);
+    while (!s.over) {
+      for (const id of war.waitingOn(s)) war.act(s, id, war.autoAction(s, id), ctx);
+      assert.strictEqual(s.piles[0].length + s.piles[1].length, 52);
+    }
+    assert(s.round <= 300);
+  }
 });
 
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);
