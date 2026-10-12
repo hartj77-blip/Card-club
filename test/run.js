@@ -7,6 +7,9 @@ const spades = require('../server/games/spades');
 const gin = require('../server/games/ginrummy');
 const blackjack = require('../server/games/blackjack');
 const yahtzee = require('../server/games/yahtzee');
+const roulette = require('../server/games/roulette');
+const craps = require('../server/games/craps');
+const threecard = require('../server/games/threecard');
 const { newDeck } = require('../server/cards');
 
 let passed = 0;
@@ -316,6 +319,75 @@ test('bots finish 60 three-player games with sensible scores', () => {
     }
   }
   assert(total / 180 > 190, `bots average only ${(total / 180).toFixed(0)}`);
+});
+
+console.log('Casino tables');
+// Run a table with bots for a while; every chip must be accounted for between players and the house.
+function runTable(mod, opts, rounds, extraActors) {
+  const ids = ['a', 'b', 'c'];
+  const chips = {};
+  ids.forEach((i) => { chips[i] = 5000; });
+  const ctx = makeCtx(chips);
+  const s = mod.create(ids.map((id) => ({ id, name: id })), opts, ctx);
+  let n = 0;
+  for (let step = 0; step < rounds * 40 && n < rounds; step++) {
+    const w = mod.waitingOn(s);
+    const opt = extraActors ? mod.optionalActors(s) : [];
+    const who = opt[0] || w[0];
+    if (!who) { n++; mod.act(s, 'a', { type: 'next' }, ctx); continue; }
+    const a = mod.autoAction(s, who, true, ctx);
+    if (!a) { n++; continue; }
+    mod.act(s, who, a, ctx);
+    if (a.type === 'roll') n++;
+    for (const v of Object.values(chips)) assert(v >= 0, 'negative chips');
+  }
+  return { s, chips, ctx };
+}
+test('roulette: bots play 300 spins; refunds on early end', () => {
+  const { s, chips, ctx } = runTable(roulette, { minBet: 5, maxBet: 500, doubleZero: 1 }, 300);
+  assert(s.history.length > 0);
+  if (s.phase === 'spun') roulette.act(s, 'a', { type: 'next' }, ctx);
+  roulette.act(s, 'a', { type: 'clear' }, ctx);
+  const before = chips.a;
+  roulette.act(s, 'a', { type: 'bet', kind: 'red', amount: 50 }, ctx);
+  assert.strictEqual(chips.a, before - 50);
+  roulette.abort(s, ctx);
+  assert.strictEqual(chips.a, before, 'bet not refunded');
+});
+test('roulette: straight-up pays 35 to 1', () => {
+  const chips = { a: 1000 };
+  const ctx = makeCtx(chips);
+  const s = roulette.create([{ id: 'a', name: 'a' }], { minBet: 5, maxBet: 500, doubleZero: 0 }, ctx);
+  for (let n = 0; n <= 36; n++) roulette.act(s, 'a', { type: 'bet', kind: 'straight', value: n, amount: 10 }, ctx);
+  roulette.act(s, 'a', { type: 'spin' }, ctx);
+  assert.strictEqual(chips.a, 1000 - 370 + 360, 'covering every number should lose exactly one unit');
+});
+test('craps: bots play 400 rolls; pass line and odds pay correctly', () => {
+  runTable(craps, { minBet: 5, maxBet: 500 }, 400, true);
+  const chips = { a: 1000 };
+  const ctx = makeCtx(chips);
+  const s = craps.create([{ id: 'a', name: 'a' }], { minBet: 5, maxBet: 500 }, ctx);
+  craps.act(s, 'a', { type: 'bet', spot: 'pass', amount: 10 }, ctx);
+  assert.throws(() => craps.act(s, 'a', { type: 'bet', spot: 'passOdds', amount: 10 }, ctx), /only open once a point/);
+  s.point = 4; // pretend a 4 was rolled
+  craps.act(s, 'a', { type: 'bet', spot: 'passOdds', amount: 30 }, ctx);
+  assert.throws(() => craps.act(s, 'a', { type: 'bet', spot: 'passOdds', amount: 5 }, ctx), /limited to 3x/);
+  // Force the point: 10 line pays 10, 30 odds on 4 pay 2:1 = 60.
+  const crypto = require('crypto');
+  const realRandomInt = crypto.randomInt;
+  crypto.randomInt = () => 1; // both dice show 2
+  try { craps.act(s, 'a', { type: 'roll' }, ctx); } finally { crypto.randomInt = realRandomInt; }
+  assert.strictEqual(chips.a, 1000 + 10 + 60);
+  assert.strictEqual(s.point, null);
+});
+test('three card poker: exact hand counts and bots play 500 hands', () => {
+  const d = newDeck();
+  const cnt = [0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < 52; i++) for (let j = i + 1; j < 52; j++) for (let k = j + 1; k < 52; k++) cnt[threecard.score3([d[i], d[j], d[k]])[0]]++;
+  assert.deepStrictEqual(cnt, [16440, 3744, 1096, 720, 52, 48]);
+  assert(threecard.qualifies(threecard.score3(['QS', '7H', '2D'])));
+  assert(!threecard.qualifies(threecard.score3(['JS', '9H', '2D'])));
+  runTable(threecard, { minBet: 10, maxBet: 500 }, 500);
 });
 
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);

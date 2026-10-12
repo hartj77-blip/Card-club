@@ -14,11 +14,14 @@ invite link, and everyone plays together in real time on desktop or phone. No si
 | Gin Rummy | 2 | Melds and deadwood counted for you; knock, gin, big gin, undercuts, layoffs, game and box bonuses |
 | Blackjack | 1–7 vs. the house | Double, split, 3:2 blackjack, dealer stands on all 17s |
 | Yahtzee | 1–6 | Hold dice between rolls, live scorecard with score previews, upper bonus, Yahtzee bonuses and joker rule |
+| Roulette | 1–8 vs. the house | Everyone bets on the same spin: numbers, colors, odd/even, dozens, columns; single or double zero |
+| Craps | 1–8 vs. the house | Rotating shooter; Pass/Don't Pass with odds, Come, Field, Place 6/8, Any 7, Any Craps |
+| Three Card Poker | 1–7 vs. the house | Ante and Pair Plus, play or fold, dealer qualifies with Queen-high, standard paytables |
 
 **Room features**
 
-- **Shared chip bank.** Everyone starts with 1,000 chips (the host can change this). Hold'em
-  and Blackjack bet straight from it. Spades and Gin can have an optional chip stake, and the
+- **Shared chip bank.** Everyone starts with 1,000 chips (the host can change this). Hold'em,
+  Blackjack, Roulette, Craps and Three Card Poker bet straight from it. Spades and Gin can have an optional chip stake, and the
   winners split the pot.
 - **Automatic score keeping.** A leaderboard of wins per player per game, plus a history of
   every finished game or session with its result. Rebuys are tracked, so "net" is honest.
