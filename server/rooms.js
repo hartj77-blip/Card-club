@@ -8,6 +8,7 @@ const GAMES = {
   spades: require('./games/spades'),
   ginrummy: require('./games/ginrummy'),
   blackjack: require('./games/blackjack'),
+  yahtzee: require('./games/yahtzee'),
 };
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
