@@ -163,7 +163,26 @@
     return joinRoom(code);
   }
 
+  // When a new version is published, offer a reload. (GitHub Pages lets browsers keep
+  // files for a few minutes, and a host's open tab keeps running the old game engine.)
+  async function checkForUpdate() {
+    if (!window.CARD_CLUB_VERSION || S.updateAvailable) return;
+    try {
+      const res = await fetch(`version.json?t=${Date.now()}`, { cache: 'no-store' });
+      const { version } = await res.json();
+      if (version && version !== window.CARD_CLUB_VERSION) {
+        S.updateAvailable = true;
+        if (S.room) renderTopbar(); else render();
+      }
+    } catch {}
+  }
+
   function boot() {
+    if (window.CARD_CLUB_VERSION) {
+      setTimeout(checkForUpdate, 3000);
+      setInterval(checkForUpdate, 5 * 60 * 1000);
+      document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+    }
     if (P2P) P2P.onHostStatus(() => renderTopbar());
     if (P2P) P2P.onVoice((v, kind) => { if (kind === 'speaking') applySpeaking(); else renderTopbar(); });
     render();
@@ -315,6 +334,7 @@
       <div class="landing">
         <div class="landing-card">
           <div class="logo">Card Club <span class="suits">♠♥♦♣</span></div>
+          ${S.updateAvailable ? '<button class="btn primary" style="width:100%;margin:10px 0 0" data-a="reload">⟳ A new version is out: tap to reload</button>' : ''}
           <p class="tagline">${joining ? `You've been invited to room <b>${esc(joining)}</b>.` : 'Cards with your friends, right in the browser. No sign-up.'}</p>
           <form id="landing-form">
             <div class="field">
@@ -372,6 +392,7 @@
       <span class="room-code" title="Room code">${esc(S.room.code)}</span>
       <button class="btn small" data-a="copy-link">Copy invite link</button>
       ${voiceBarHTML()}
+      ${S.updateAvailable ? '<button class="btn small primary" data-a="reload" title="A newer version of Card Club is out">⟳ Update available: reload</button>' : ''}
       <span class="spacer"></span>
       ${P2P && P2P.isHosting() ? (P2P.hostOnline()
         ? '<span class="tag host" title="Your tab is running this room. If you close it, the game pauses for everyone.">● Room online · keep this tab open</span>'
@@ -1382,6 +1403,11 @@
           .catch(() => prompt('Copy this link:', url));
         break;
       }
+      case 'reload':
+        if (P2P && P2P.isHosting() && S.room && S.room.members.some((m) => !m.isBot && m.connected && m.id !== S.me)
+          && !confirm('Reload to get the update? Your room reopens with the same code and chips, and friends reconnect automatically.')) break;
+        location.reload();
+        break;
       case 'sound': S.sound = !S.sound; store.set('cc_sound', S.sound ? 'on' : 'off'); renderTopbar(); if (S.sound) beep(); break;
       case 'voice-join':
         P2P.voiceJoin(S.me).catch((e) => toast(e.message));
