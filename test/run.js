@@ -6,6 +6,7 @@ const holdem = require('../server/games/holdem');
 const spades = require('../server/games/spades');
 const gin = require('../server/games/ginrummy');
 const blackjack = require('../server/games/blackjack');
+const yahtzee = require('../server/games/yahtzee');
 const { newDeck } = require('../server/cards');
 
 let passed = 0;
@@ -246,6 +247,75 @@ test('blackjack: 2000 rounds, payouts sane', () => {
   const { handTotal } = blackjack;
   assert.deepStrictEqual(handTotal(['AS', 'AD', '9C']), { total: 21, soft: true });
   assert.deepStrictEqual(handTotal(['KS', 'QD', '5C']), { total: 25, soft: false });
+});
+
+console.log('Yahtzee');
+test('scores every box correctly', () => {
+  const r = yahtzee.rawScore;
+  assert.strictEqual(r('fives', [5, 5, 2, 5, 1]), 15);
+  assert.strictEqual(r('threeKind', [4, 4, 4, 2, 1]), 15);
+  assert.strictEqual(r('threeKind', [4, 4, 3, 2, 1]), 0);
+  assert.strictEqual(r('fourKind', [6, 6, 6, 6, 1]), 25);
+  assert.strictEqual(r('fullHouse', [2, 2, 3, 3, 3]), 25);
+  assert.strictEqual(r('fullHouse', [3, 3, 3, 3, 3]), 0);
+  assert.strictEqual(r('smallStraight', [3, 4, 5, 6, 6]), 30);
+  assert.strictEqual(r('smallStraight', [1, 2, 3, 5, 6]), 0);
+  assert.strictEqual(r('largeStraight', [1, 2, 3, 4, 5]), 40);
+  assert.strictEqual(r('yahtzee', [2, 2, 2, 2, 2]), 50);
+  assert.strictEqual(r('chance', [1, 2, 3, 4, 6]), 16);
+});
+test('upper bonus at 63 and joker / Yahtzee bonus rules', () => {
+  const card = Object.fromEntries(['ones', 'twos', 'threes', 'fours', 'fives', 'sixes', 'threeKind', 'fourKind', 'fullHouse', 'smallStraight', 'largeStraight', 'yahtzee', 'chance'].map((c) => [c, null]));
+  Object.assign(card, { ones: 3, twos: 6, threes: 9, fours: 12, fives: 15, sixes: 18 });
+  assert.strictEqual(yahtzee.totals(card, 0).bonus, 35);
+  // Extra Yahtzee with its upper box filled: lower boxes score full joker value.
+  const c2 = { ...card, yahtzee: 50 };
+  const opts = yahtzee.options(c2, [4, 4, 4, 4, 4]);
+  assert.strictEqual(opts.fullHouse, 25);
+  assert.strictEqual(opts.largeStraight, 40);
+  assert(!('fours' in opts));
+  // With the matching upper box open, it must go there.
+  const c3 = { ...c2, fours: null };
+  assert.deepStrictEqual(Object.keys(yahtzee.options(c3, [4, 4, 4, 4, 4])), ['fours']);
+  // The bonus is awarded through act().
+  const s = yahtzee.create([{ id: 'a', name: 'a' }]);
+  s.cards[0].yahtzee = 50;
+  s.rollsLeft = 1;
+  s.dice = [6, 6, 6, 6, 6];
+  yahtzee.act(s, 'a', { type: 'score', category: 'sixes' }, makeCtx({}));
+  assert.strictEqual(s.yahtzeeBonus[0], 100);
+});
+test('turn rules: roll first, max three rolls, held dice stay put', () => {
+  const ctx = makeCtx({});
+  const s = yahtzee.create([{ id: 'a', name: 'a' }, { id: 'b', name: 'b' }]);
+  assert.throws(() => yahtzee.act(s, 'a', { type: 'score', category: 'chance' }, ctx), /Roll first/);
+  assert.throws(() => yahtzee.act(s, 'b', { type: 'roll' }, ctx), /not your turn/);
+  yahtzee.act(s, 'a', { type: 'roll' }, ctx);
+  const kept = s.dice[0];
+  yahtzee.act(s, 'a', { type: 'hold', index: 0 }, ctx);
+  yahtzee.act(s, 'a', { type: 'roll' }, ctx);
+  yahtzee.act(s, 'a', { type: 'roll' }, ctx);
+  assert.strictEqual(s.dice[0], kept);
+  assert.throws(() => yahtzee.act(s, 'a', { type: 'roll' }, ctx), /No rolls left/);
+  yahtzee.act(s, 'a', { type: 'score', category: 'chance' }, ctx);
+  assert.strictEqual(s.turn, 1);
+});
+test('bots finish 60 three-player games with sensible scores', () => {
+  const ctx = makeCtx({});
+  let total = 0;
+  for (let g = 0; g < 60; g++) {
+    const s = yahtzee.create(['a', 'b', 'c'].map((id) => ({ id, name: id })));
+    for (let i = 0; i < 1000 && !s.over; i++) {
+      const id = yahtzee.waitingOn(s)[0];
+      yahtzee.act(s, id, yahtzee.autoAction(s, id), ctx);
+    }
+    assert(s.over, 'game did not finish');
+    for (let i = 0; i < 3; i++) {
+      assert(Object.values(s.cards[i]).every((v) => v !== null), 'scorecard not full');
+      total += yahtzee.totals(s.cards[i], s.yahtzeeBonus[i]).total;
+    }
+  }
+  assert(total / 180 > 190, `bots average only ${(total / 180).toFixed(0)}`);
 });
 
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);
