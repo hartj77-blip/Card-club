@@ -9,6 +9,9 @@ const GAMES = {
   ginrummy: require('./games/ginrummy'),
   blackjack: require('./games/blackjack'),
   yahtzee: require('./games/yahtzee'),
+  roulette: require('./games/roulette'),
+  craps: require('./games/craps'),
+  threecard: require('./games/threecard'),
 };
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -495,6 +498,15 @@ class Rooms {
       else if (!m.sockets.size) delay = Math.max(300, AFK_GRACE - (now - (m.disconnectedAt || now)));
       else continue;
       if (!best || delay < best.delay) best = { id, delay, isBot: !m || m.isBot };
+    }
+    // Some games (Craps) let everyone bet between turns; bots get a quicker turn to do so.
+    if (g.module.optionalActors) {
+      for (const id of g.module.optionalActors(g.state)) {
+        const m = room.members.get(id);
+        if (!m || !m.isBot) continue;
+        const delay = BOT_DELAY * 0.6;
+        if (!best || delay < best.delay) best = { id, delay, isBot: true };
+      }
     }
     if (!best) return;
     room.autoTimer = setTimeout(() => {

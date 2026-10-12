@@ -326,7 +326,7 @@
           ${busy ? `<p class="status-line">${esc(S.status)}${S.status.startsWith('Waiting') || S.status.startsWith('Connecting') ? ' <a href="#" id="cancel-join" class="muted">Cancel</a>' : ''}</p>` : ''}
           ${S.error && !busy ? `<p class="error-line">${esc(S.error)}</p>` : ''}
           ${P2P && !joining ? '<p class="muted" style="font-size:13px;margin:16px 0 0">Creating a room makes this tab the game host. Keep it open while you play.</p>' : ''}
-          <div class="game-list"><span>Texas Hold'em</span><span>Spades</span><span>Gin Rummy</span><span>Blackjack</span><span>Yahtzee</span></div>
+          <div class="game-list"><span>Texas Hold'em</span><span>Spades</span><span>Gin Rummy</span><span>Blackjack</span><span>Yahtzee</span><span>Roulette</span><span>Craps</span><span>Three Card Poker</span></div>
         </div>
       </div>`;
     const nameEl = document.getElementById('name');
@@ -428,7 +428,7 @@
   }
 
   // ---------- lobby ----------
-  const GAME_SUIT = { holdem: '♠', spades: '♣', ginrummy: '♦', blackjack: '♥', yahtzee: '⚄' };
+  const GAME_SUIT = { holdem: '♠', spades: '♣', ginrummy: '♦', blackjack: '♥', yahtzee: '⚄', roulette: '◎', craps: '⚅', threecard: '♦' };
 
   function lobbyHTML() {
     const r = S.room;
@@ -1006,7 +1006,273 @@
       ${card}`;
   }
 
-  const RENDER = { holdem: holdemHTML, spades: spadesHTML, ginrummy: ginHTML, blackjack: blackjackHTML, yahtzee: yahtzeeHTML };
+  // ---------- shared casino bits ----------
+  function chipPickerHTML(minBet, chips) {
+    const values = [5, 25, 100, 500, 1000].filter((n) => n >= minBet);
+    if (!values.length) values.push(minBet);
+    if (!values.includes(S.ui.chip)) S.ui.chip = values[0];
+    const colors = { 5: '#c62828', 25: '#2c8a4f', 100: '#222', 500: '#7b4bb5', 1000: '#c9a227' };
+    return `
+      <div class="chip-picker">
+        <span class="muted" style="font-size:13px">Chip</span>
+        ${values.map((n) => `<button class="chip-btn ${S.ui.chip === n ? 'on' : ''}" style="background:${colors[n] || '#2f6fb3'}" data-a="chip-pick" data-v="${n}">${n >= 1000 ? `${n / 1000}k` : n}</button>`).join('')}
+        <span class="muted" style="font-size:13px">You have <b style="color:var(--gold)">${fmt(chips)}</b></span>
+      </div>`;
+  }
+  const betBadge = (n) => (n ? `<span class="bet-badge">${fmt(n)}</span>` : '');
+  const netText = (n) => `<span class="${n > 0 ? 'good' : n < 0 ? 'bad' : 'muted'}">${n === 0 ? 'Even' : signed(n)}</span>`;
+
+  // ---------- Roulette ----------
+  function rouletteHTML(v) {
+    const me = v.seats.find((x) => x.id === S.me);
+    const red = new Set(v.red);
+    const colorOf = (n) => (n === 0 || n === '00' ? 'green' : red.has(n) ? 'red' : 'black');
+    // Let the wheel spin for a moment before revealing a fresh result.
+    if (S.ui.rSeen !== v.spinNo) {
+      if (S.ui.rSeen !== undefined && v.result) {
+        S.ui.rSpinUntil = Date.now() + 2400;
+        setTimeout(() => renderStage(), 2450);
+      }
+      S.ui.rSeen = v.spinNo;
+    }
+    const spinning = v.phase === 'spun' && Date.now() < (S.ui.rSpinUntil || 0);
+    const res = v.result;
+    const sameSpot = (b, kind, value) => b.kind === kind && String(b.value ?? '') === String(value ?? '');
+    const myBets = (kind, value) => (me ? me.bets.filter((b) => sameSpot(b, kind, value)).reduce((a, b) => a + b.amount, 0) : 0);
+    const others = (kind, value) => v.seats.filter((x) => x.id !== S.me && x.bets.some((b) => sameSpot(b, kind, value))).length;
+    const canBet = me && v.phase === 'betting';
+    const spot = (kind, value, label, cls, style) => {
+      const mine = myBets(kind, value);
+      const o = others(kind, value);
+      const win = v.phase === 'spun' && !spinning && res && kind === 'straight' && String(res.number) === String(value);
+      return `<button class="rspot ${cls} ${win ? 'rwin' : ''}" style="${style}" ${canBet ? `data-a="r-bet" data-kind="${kind}" data-value="${value === undefined ? '' : value}"` : 'disabled'}>
+        <span>${label}</span>${betBadge(mine)}${o ? `<span class="other-dots" title="${o} other player${o > 1 ? 's' : ''} bet here">${'•'.repeat(Math.min(o, 4))}</span>` : ''}</button>`;
+    };
+
+    // Board: numbers in 3 rows x 12 columns (or 12 rows x 3 columns on phones).
+    const tall = window.innerWidth <= 700;
+    const cells = [];
+    const zeroes = v.options.doubleZero ? [0, '00'] : [0];
+    zeroes.forEach((z, i) => {
+      // A lone 0 spans all three lanes; with 00, 0 takes two lanes and 00 the third.
+      const lanes = zeroes.length === 1 ? '1 / span 3' : i === 0 ? '1 / span 2' : '3';
+      cells.push(spot('straight', z, z, 'green', tall ? `grid-row:1;grid-column:${lanes}` : `grid-column:1;grid-row:${lanes}`));
+    });
+    for (let n = 1; n <= 36; n++) {
+      const col = Math.ceil(n / 3); // 1..12
+      const row = 3 - ((n - 1) % 3); // 3,6,9.. on top in the wide layout
+      const style = tall ? `grid-row:${col + 1};grid-column:${((n - 1) % 3) + 1}` : `grid-column:${col + 1};grid-row:${row}`;
+      cells.push(spot('straight', n, n, colorOf(n), style));
+    }
+    for (let c = 1; c <= 3; c++) {
+      cells.push(spot('column', c, '2:1', 'outside', tall ? `grid-row:14;grid-column:${c}` : `grid-column:14;grid-row:${4 - c}`));
+    }
+    const board = `<div class="rboard ${tall ? 'tall' : ''}">${cells.join('')}</div>`;
+    const outside = `
+      <div class="routside">
+        ${[1, 2, 3].map((d) => spot('dozen', d, `${['1st', '2nd', '3rd'][d - 1]} 12`, 'outside', '')).join('')}
+      </div>
+      <div class="routside six">
+        ${spot('low', undefined, '1-18', 'outside', '')}${spot('even', undefined, 'Even', 'outside', '')}
+        ${spot('red', undefined, '<span class="diamond red"></span>', 'outside', '')}${spot('black', undefined, '<span class="diamond black"></span>', 'outside', '')}
+        ${spot('odd', undefined, 'Odd', 'outside', '')}${spot('high', undefined, '19-36', 'outside', '')}
+      </div>`;
+
+    const wheel = `
+      <div class="rwheel-wrap">
+        <div class="rwheel ${spinning ? 'spinning' : ''}"></div>
+        <div class="rresult ${spinning || !res ? '' : res.color}">${spinning ? '…' : res ? res.number : '–'}</div>
+      </div>`;
+    const historyStrip = `<div class="rhistory">${v.history.slice(spinning ? 1 : 0, 14).map((h) => `<span class="rh ${h.color}">${h.number}</span>`).join('')}</div>`;
+
+    const seats = v.seats.map((x) => `
+      <div class="cseat ${x.id === S.me ? 'me' : ''}" data-voice-id="${x.id}">
+        <div class="pname">${member(x.id).isBot ? '🤖 ' : ''}${esc(x.name)}</div>
+        <div class="muted" style="font-size:12px">${fmt(x.chips)} chips${x.onTable ? ` · ${fmt(x.onTable)} bet` : ''}</div>
+        <div style="font-size:12px">${v.phase === 'betting' ? (x.ready ? '<span class="good">Ready</span>' : '<span class="muted">Betting…</span>') : spinning ? '' : x.payout ? netText(x.payout.net) : '<span class="muted">No bet</span>'}</div>
+      </div>`).join('');
+
+    let controls = '';
+    if (me && v.phase === 'betting') {
+      const anyBets = v.seats.some((x) => x.onTable);
+      controls = `
+        <div class="actions">
+          ${chipPickerHTML(v.options.minBet, me.chips)}
+          <div class="row">
+            <button class="btn small" data-a="r-undo" ${me.bets.length ? '' : 'disabled'}>Undo</button>
+            <button class="btn small" data-a="r-clear" ${me.bets.length ? '' : 'disabled'}>Clear</button>
+            <button class="btn small" data-a="r-repeat" ${v.canRepeat && !me.bets.length ? '' : 'disabled'}>Repeat last bets</button>
+            ${me.ready ? '<span class="muted">Waiting for the others…</span>' : `<button class="btn primary big" data-a="r-ready">${me.bets.length ? 'Done betting' : 'Sit this spin out'}</button>`}
+            ${anyBets ? '<button class="btn" data-a="r-spin">Spin now</button>' : ''}
+          </div>
+          ${me.chips < v.options.minBet && !me.bets.length ? `<button class="btn" data-a="rebuy">Rebuy ${fmt(S.room.settings.startingChips)}</button>` : ''}
+        </div>`;
+    } else if (me && v.phase === 'spun' && !spinning) {
+      const p = me.payout;
+      controls = `
+        <div class="actions"><div class="result-panel">
+          <div style="font-size:18px">${res.number} ${res.color === 'green' ? '' : res.color}${p ? ` · you ${p.net > 0 ? 'win' : p.net < 0 ? 'lose' : 'break even'} ${p.net ? fmt(Math.abs(p.net)) : ''}` : ''}</div>
+          ${p && p.wins.length ? `<div class="muted" style="font-size:13px">${p.wins.map((w) => `${esc(w.label)} +${fmt(w.amount)}`).join(' · ')}</div>` : ''}
+          <button class="btn primary big" data-a="next-round">Next spin</button>
+        </div></div>`;
+    }
+
+    return `
+      <div class="casino-top">${wheel}${historyStrip}</div>
+      <div class="rtable">${board}${outside}</div>
+      <div class="cseats">${seats}</div>
+      ${controls}`;
+  }
+
+  // ---------- Craps ----------
+  function crapsHTML(v) {
+    const me = v.seats.find((x) => x.id === S.me);
+    const fresh = S.ui.cRollNo !== v.rollNo;
+    S.ui.cRollNo = v.rollNo;
+    const myB = me ? me.bets : null;
+    const isShooter = v.shooter === S.me;
+    const shooterName = v.shooter ? esc(member(v.shooter).name) : '—';
+    const open = (when) => when === 'any' || (when === 'comeout' ? !v.point : !!v.point);
+
+    const numbers = [4, 5, 6, 8, 9, 10].map((n) => `
+      <div class="cnum ${v.point === n ? 'on' : ''}">
+        ${v.point === n ? '<span class="puck">ON</span>' : ''}
+        <span class="cnum-n">${n === 6 ? 'SIX' : n === 9 ? 'NINE' : n}</span>
+        ${myB && myB.comePoints[n] ? `<span class="bet-badge" title="Your come bet">${fmt(myB.comePoints[n])}</span>` : ''}
+      </div>`).join('');
+
+    const spotOrder = ['pass', 'dontPass', 'passOdds', 'come', 'field', 'place6', 'place8', 'any7', 'anyCraps'];
+    const hints = {
+      pass: 'Win on 7/11, then the point', dontPass: 'Win on 2/3, then a 7 first', passOdds: `True odds, up to ${v.oddsMax}x`,
+      come: 'Like Pass, on the next roll', field: '2,3,4,9,10,11,12 · 2 pays 2:1 · 12 pays 3:1',
+      place6: 'Pays 7:6 · off on come-out', place8: 'Pays 7:6 · off on come-out', any7: 'One roll · pays 4:1', anyCraps: '2,3,12 one roll · pays 7:1',
+    };
+    const spots = spotOrder.map((k) => {
+      const def = v.spots[k];
+      const amt = myB ? myB[k] : 0;
+      const can = me && open(def.when) && (k !== 'passOdds' || (myB && myB.pass && myB.passOdds < myB.pass * v.oddsMax));
+      return `
+        <div class="cspot ${k} ${can ? '' : 'closed'}">
+          <button class="cspot-main" ${can ? `data-a="c-bet" data-spot="${k}"` : 'disabled'}>
+            <span class="cspot-label">${def.label}</span>
+            <span class="cspot-hint">${hints[k]}</span>
+          </button>
+          ${amt ? `${betBadge(amt)}${def.removable ? `<button class="cspot-x" data-a="c-remove" data-spot="${k}" title="Take down">×</button>` : ''}` : ''}
+        </div>`;
+    }).join('');
+
+    const dice = v.dice ? v.dice.map((d) => dieHTML(d, fresh ? 'rolling' : '', 'disabled')).join('') : `${dieHTML(1, 'idle', 'disabled')}${dieHTML(1, 'idle', 'disabled')}`;
+    const last = v.log[0];
+    const myLast = me && me.last ? me.last : null;
+
+    const seats = v.seats.map((x) => `
+      <div class="cseat ${x.id === S.me ? 'me' : ''} ${x.id === v.shooter ? 'turn' : ''}" data-voice-id="${x.id}">
+        <div class="pname">${x.id === v.shooter ? '🎲 ' : ''}${member(x.id).isBot ? '🤖 ' : ''}${esc(x.name)}</div>
+        <div class="muted" style="font-size:12px">${fmt(x.chips)} chips${x.onTable ? ` · ${fmt(x.onTable)} on table` : ''}</div>
+        ${x.last ? `<div style="font-size:12px">${netText(x.last.reduce((a, r) => a + r.net, 0))}</div>` : ''}
+      </div>`).join('');
+
+    return `
+      <div class="casino-top">
+        <div class="cpoint">${v.point ? `Point is <b>${v.point}</b>` : 'Come-out roll'} · Shooter: <b>${shooterName}</b></div>
+        <div class="dice-row">${dice}</div>
+        <div class="yz-status">${last ? `${last.total}: ${esc(last.text.replace(/^\d+: /, ''))}` : 'Place your bets, then the shooter rolls'}</div>
+        ${myLast ? `<div class="muted" style="font-size:13px;text-align:center">${myLast.map((r) => `${esc(r.label)} ${r.net > 0 ? '+' : ''}${fmt(r.net)}`).join(' · ')}</div>` : ''}
+      </div>
+      <div class="ctable">
+        <div class="cnums">${numbers}</div>
+        <div class="cspots">${spots}</div>
+      </div>
+      ${v.log.length > 1 ? `<div class="rhistory">${v.log.slice(0, 12).map((l) => `<span class="rh ${l.total === 7 ? 'red' : 'black'}" title="${esc(l.text)}">${l.total}</span>`).join('')}</div>` : ''}
+      <div class="cseats">${seats}</div>
+      ${me ? `<div class="actions">
+        ${chipPickerHTML(v.options.minBet, me.chips)}
+        <div class="row">
+          ${isShooter ? '<button class="btn primary big" data-a="c-roll">🎲 Roll the dice</button>' : `<span class="muted">${shooterName} is shooting</span>`}
+          ${me.chips < v.options.minBet && !me.onTable ? `<button class="btn" data-a="rebuy">Rebuy ${fmt(S.room.settings.startingChips)}</button>` : ''}
+        </div>
+      </div>` : ''}`;
+  }
+
+  // ---------- Three Card Poker ----------
+  function threecardHTML(v) {
+    const me = v.seats.find((x) => x.id === S.me);
+    const dealer = `
+      <div class="bj-dealer">
+        <div class="muted" style="font-size:13px">Dealer${v.dealerScore ? ` · <b style="color:var(--ink)">${esc(v.dealerScore.name)}</b> · ${v.dealerScore.qualifies ? 'qualifies' : "doesn't qualify"}` : ' · needs Queen-high to qualify'}</div>
+        ${v.dealer.length ? cardsHTML(v.dealer) : '<div class="cards"><div class="card empty"></div><div class="card empty"></div><div class="card empty"></div></div>'}
+      </div>`;
+    const seats = v.seats.map((x) => {
+      const h = x.hand;
+      const waiting = v.phase === 'deciding' && h && !h.decision;
+      let status = '';
+      if (v.phase === 'betting') status = x.bet ? `Ante ${fmt(x.bet.ante)}${x.bet.pairPlus ? ` · Pair Plus ${fmt(x.bet.pairPlus)}` : ''}` : x.skipping ? 'Sitting out' : 'Betting…';
+      else if (h && v.phase === 'deciding') status = h.decision ? (h.decision === 'play' ? 'Playing' : 'Folded') : 'Deciding…';
+      else if (h && h.net !== undefined) status = netText(h.net);
+      return `
+        <div class="bj-seat ${waiting ? 'turn' : ''} ${x.id === S.me ? 'me' : ''}" data-voice-id="${x.id}">
+          <div class="pname" style="font-weight:600">${member(x.id).isBot ? '🤖 ' : ''}${esc(x.name)}</div>
+          <div class="pstack" style="color:var(--gold);font-variant-numeric:tabular-nums">${fmt(x.chips)} chips</div>
+          ${h ? `<div class="bj-hand">${cardsHTML(h.cards, 'sm', 'cards overlap')}${h.handName ? `<div class="bj-total">${esc(h.handName)}</div>` : ''}</div>` : ''}
+          ${h && v.phase !== 'betting' && x.bet ? `<div class="muted" style="font-size:12px">Ante ${fmt(x.bet.ante)}${x.bet.pairPlus ? ` · PP ${fmt(x.bet.pairPlus)}` : ''}${h.play ? ` · Play ${fmt(h.play)}` : ''}</div>` : ''}
+          <div style="font-size:13px">${status}</div>
+          ${h && h.lines ? `<div class="muted" style="font-size:11px;text-align:center">${h.lines.map(esc).join(' · ')}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    let controls = '';
+    if (me && v.phase === 'betting') {
+      const o = v.options;
+      if (me.bet || me.skipping) {
+        const anyBet = v.seats.some((x) => x.bet);
+        controls = `<div class="actions"><div class="muted">${me.bet ? `Ante ${fmt(me.bet.ante)} placed.` : 'Sitting out this hand.'} Waiting for others…</div>
+          <div class="row">${anyBet ? '<button class="btn primary" data-a="t-deal">Deal now</button>' : ''}<button class="btn small" data-a="t-unbet">Change</button><button class="btn small ghost" data-a="t-leave">Leave table</button></div></div>`;
+      } else {
+        S.ui.tAnte = Math.max(o.minBet, Math.min(o.maxBet, S.ui.tAnte || o.minBet));
+        controls = `
+          <div class="actions">
+            <div style="font-size:18px">Ante <b>${fmt(S.ui.tAnte)}</b> <span class="muted" style="font-size:13px">(you'll need ${fmt(S.ui.tAnte)} more to play)</span></div>
+            <div class="row">
+              <button class="btn small" data-a="t-ante" data-v="-1">−</button>
+              ${[o.minBet, o.minBet * 2, o.minBet * 5, o.minBet * 10].filter((n) => n <= o.maxBet).map((n) => `<button class="btn small ${S.ui.tAnte === n ? 'primary' : ''}" data-a="t-ante-set" data-v="${n}">${fmt(n)}</button>`).join('')}
+              <button class="btn small" data-a="t-ante" data-v="1">+</button>
+            </div>
+            <label class="row" style="font-size:14px"><input type="checkbox" data-a="t-pp" ${S.ui.tPP ? 'checked' : ''}> Also bet Pair Plus (${fmt(S.ui.tAnte)}): pays on a pair or better, win or lose</label>
+            <div class="row">
+              <button class="btn primary big" data-a="t-bet" ${me.chips >= S.ui.tAnte * 2 + (S.ui.tPP ? S.ui.tAnte : 0) ? '' : 'disabled'}>Place bet</button>
+              <button class="btn small" data-a="t-skip">Sit out</button>
+              ${me.chips < o.minBet * 2 ? `<button class="btn" data-a="rebuy">Rebuy ${fmt(S.room.settings.startingChips)}</button>` : ''}
+            </div>
+          </div>`;
+      }
+    } else if (me && v.phase === 'deciding' && me.hand && !me.hand.decision) {
+      controls = `
+        <div class="actions">
+          <div>You have <b>${esc(me.hand.handName)}</b>. Play by matching your ante, or fold. <span class="muted" style="font-size:13px">(Rule of thumb: play Queen-6-4 or better.)</span></div>
+          <div class="row">
+            <button class="btn primary big" data-a="t-play">Play (${fmt(me.bet.ante)})</button>
+            <button class="btn danger big" data-a="t-fold">Fold</button>
+          </div>
+        </div>`;
+    } else if (v.phase === 'settled' && me) {
+      controls = '<div class="actions"><button class="btn primary big" data-a="next-round">Next hand</button></div>';
+    }
+    const pt = v.paytable;
+    const paytable = `<div class="muted" style="font-size:12px;text-align:center;padding:4px 12px">Pair Plus: pair 1:1 · flush ${pt.pairPlus[2]}:1 · straight ${pt.pairPlus[3]}:1 · trips ${pt.pairPlus[4]}:1 · straight flush ${pt.pairPlus[5]}:1 &nbsp;|&nbsp; Ante bonus: straight 1:1 · trips 4:1 · straight flush 5:1</div>`;
+    return `
+      <div class="bj-felt">
+        ${dealer}
+        <div class="rule">DEALER QUALIFIES WITH QUEEN HIGH</div>
+        <div class="bj-seats">${seats}</div>
+      </div>
+      ${paytable}
+      ${controls}`;
+  }
+
+  const RENDER = {
+    holdem: holdemHTML, spades: spadesHTML, ginrummy: ginHTML, blackjack: blackjackHTML, yahtzee: yahtzeeHTML,
+    roulette: rouletteHTML, craps: crapsHTML, threecard: threecardHTML,
+  };
 
   function afterStage() {
     applySpeaking();
@@ -1186,6 +1452,36 @@
       case 'y-roll': act({ type: 'roll' }); break;
       case 'y-hold': act({ type: 'hold', index: Number(d.i) }); break;
       case 'y-score': act({ type: 'score', category: d.cat }); break;
+      // casino tables
+      case 'chip-pick': S.ui.chip = Number(d.v); renderStage(); break;
+      case 'r-bet': {
+        const value = d.value === '' ? undefined : d.value === '00' ? '00' : Number(d.value);
+        act({ type: 'bet', kind: d.kind, value, amount: S.ui.chip });
+        break;
+      }
+      case 'r-undo': act({ type: 'undo' }); break;
+      case 'r-clear': act({ type: 'clear' }); break;
+      case 'r-repeat': act({ type: 'repeat' }); break;
+      case 'r-ready': act({ type: 'ready' }); break;
+      case 'r-spin': act({ type: 'spin' }); break;
+      case 'c-bet': act({ type: 'bet', spot: d.spot, amount: S.ui.chip }); break;
+      case 'c-remove': act({ type: 'remove', spot: d.spot }); break;
+      case 'c-roll': act({ type: 'roll' }); break;
+      case 't-ante': {
+        const o = S.room.game.view.options;
+        S.ui.tAnte = Math.max(o.minBet, Math.min(o.maxBet, (S.ui.tAnte || o.minBet) + Number(d.v) * o.minBet));
+        renderStage();
+        break;
+      }
+      case 't-ante-set': S.ui.tAnte = Number(d.v); renderStage(); break;
+      case 't-pp': S.ui.tPP = el.checked; renderStage(); break;
+      case 't-bet': act({ type: 'bet', ante: S.ui.tAnte, pairPlus: S.ui.tPP ? S.ui.tAnte : 0 }); break;
+      case 't-skip': act({ type: 'skip' }); break;
+      case 't-unbet': act({ type: 'unbet' }); break;
+      case 't-deal': act({ type: 'deal' }); break;
+      case 't-play': act({ type: 'play' }); break;
+      case 't-fold': act({ type: 'fold' }); break;
+      case 't-leave': if (confirm('Leave the table?')) act({ type: 'leave' }); break;
       default: break;
     }
   });
