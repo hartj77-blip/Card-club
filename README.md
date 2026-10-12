@@ -1,5 +1,7 @@
 # Card Club ♠♥♦♣
 
+### ▶ [Play now: hartj77-blip.github.io/Card-club](https://hartj77-blip.github.io/Card-club/)
+
 A browser card (and dice) room for you and your friends. One person creates a room, sends the
 invite link, and everyone plays together in real time on desktop or phone. No sign-up needed.
 
