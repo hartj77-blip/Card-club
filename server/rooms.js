@@ -8,10 +8,10 @@ const GAMES = {
   spades: require('./games/spades'),
   ginrummy: require('./games/ginrummy'),
   blackjack: require('./games/blackjack'),
+  hearts: require('./games/hearts'),
+  solitaire: require('./games/solitaire'),
+  war: require('./games/war'),
   yahtzee: require('./games/yahtzee'),
-  roulette: require('./games/roulette'),
-  craps: require('./games/craps'),
-  threecard: require('./games/threecard'),
 };
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -427,11 +427,13 @@ class Rooms {
     const g = room.game;
     const { winners, summary } = g.state.over;
     const ctx = this.ctx(room);
-    if (g.pot) {
+    if (g.pot && winners.length) {
       const share = Math.floor(g.pot / winners.length);
       winners.forEach((w, i) => ctx.addChips(w, share + (i === 0 ? g.pot - share * winners.length : 0)));
+    } else if (g.pot) {
+      for (const id of g.playerIds) ctx.addChips(id, g.pot / g.playerIds.length); // nobody won: refund the stakes
     }
-    g.over = { summary: summary + (g.pot ? ` and take the ${g.pot} chip pot` : '') };
+    g.over = { summary: summary + (g.pot && winners.length ? ` and take the ${g.pot} chip pot` : ''), winners };
     this.record(room, g, winners, g.over.summary);
   }
 
@@ -479,7 +481,7 @@ class Rooms {
       bg.played++;
       if (winners.includes(id)) { st.wins++; bg.wins++; }
     }
-    this.system(room, `🏆 ${g.module.meta.name}: ${summary}`);
+    this.system(room, `${winners.length ? '🏆 ' : ''}${g.module.meta.name}: ${summary}`);
   }
 
   // --- automatic play for bots and disconnected players ----------------------------
@@ -498,15 +500,6 @@ class Rooms {
       else if (!m.sockets.size) delay = Math.max(300, AFK_GRACE - (now - (m.disconnectedAt || now)));
       else continue;
       if (!best || delay < best.delay) best = { id, delay, isBot: !m || m.isBot };
-    }
-    // Some games (Craps) let everyone bet between turns; bots get a quicker turn to do so.
-    if (g.module.optionalActors) {
-      for (const id of g.module.optionalActors(g.state)) {
-        const m = room.members.get(id);
-        if (!m || !m.isBot) continue;
-        const delay = BOT_DELAY * 0.6;
-        if (!best || delay < best.delay) best = { id, delay, isBot: true };
-      }
     }
     if (!best) return;
     room.autoTimer = setTimeout(() => {
