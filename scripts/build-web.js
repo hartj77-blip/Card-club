@@ -63,19 +63,30 @@ fs.writeFileSync(path.join(OUT, 'engine.js'), bundle);
 fs.copyFileSync(path.join(ROOT, 'web', 'p2p.js'), path.join(OUT, 'p2p.js'));
 fs.copyFileSync(require.resolve('peerjs/dist/peerjs.min.js'), path.join(OUT, 'peerjs.min.js'));
 
-const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8').replace(
-  '<script src="app.js"></script>',
-  [
-    '<script>window.CARD_CLUB_MODE = "p2p";</script>',
-    '<script src="peerjs.min.js"></script>',
-    '<script src="engine.js"></script>',
-    '<script src="p2p.js"></script>',
+// Version every file URL by a hash of the build, so a browser can never mix old and
+// new files, and publish the version so open tabs can tell when an update is out.
+const hash = require('crypto').createHash('sha256');
+for (const f of ['engine.js', 'p2p.js', 'app.js', 'style.css']) hash.update(fs.readFileSync(path.join(OUT, f)));
+const version = hash.digest('hex').slice(0, 10);
+const v = (file) => `${file}?v=${version}`;
+
+const html = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8')
+  .replace('<link rel="stylesheet" href="style.css">', `<link rel="stylesheet" href="${v('style.css')}">`)
+  .replace(
     '<script src="app.js"></script>',
-  ].join('\n  '),
-);
+    [
+      `<script>window.CARD_CLUB_MODE = "p2p"; window.CARD_CLUB_VERSION = "${version}";</script>`,
+      `<script src="${v('peerjs.min.js')}"></script>`,
+      `<script src="${v('engine.js')}"></script>`,
+      `<script src="${v('p2p.js')}"></script>`,
+      `<script src="${v('app.js')}"></script>`,
+    ].join('\n  '),
+  );
 if (!html.includes('CARD_CLUB_MODE')) throw new Error('index.html is missing the app.js script tag');
+if (!html.includes(v('style.css'))) throw new Error('index.html is missing the style.css link');
 fs.writeFileSync(path.join(OUT, 'index.html'), html);
+fs.writeFileSync(path.join(OUT, 'version.json'), JSON.stringify({ version }));
 // Let GitHub Pages serve files as-is.
 fs.writeFileSync(path.join(OUT, '.nojekyll'), '');
 
-console.log(`Built ${path.relative(process.cwd(), OUT)}/ (${modules.size} engine modules)`);
+console.log(`Built ${path.relative(process.cwd(), OUT)}/ (${modules.size} engine modules, version ${version})`);
