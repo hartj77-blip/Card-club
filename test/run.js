@@ -411,4 +411,210 @@ test('war: 500 games keep all 52 cards and always finish', () => {
   }
 });
 
+
+// --- Room-level tests: the same code path real players hit through protocol.js ---
+const { Rooms, GAMES } = require('../server/rooms');
+
+function makeRooms() {
+  const rooms = new Rooms({ storage: { load: () => null, save() {} } });
+  rooms.scheduleAuto = () => {}; // drive bots by hand so tests stay synchronous
+  rooms.save = () => {};
+  return rooms;
+}
+function fakeConn(id, name) {
+  const sent = [];
+  return { player: { id, name }, readyState: 1, roomCode: null, sent, send: (m) => sent.push(JSON.parse(m)) };
+}
+// A room with `humans` connected players plus `bots` bots, game selected.
+function setupRoom(gameId, humans, bots) {
+  const rooms = makeRooms();
+  const conns = Array.from({ length: humans }, (_, i) => fakeConn(`p${i}`, `P${i}`));
+  const room = rooms.create(conns[0].player);
+  for (const c of conns) rooms.join(room.code, c);
+  for (let i = 0; i < bots; i++) rooms.command(room.code, conns[0], { t: 'addBot' });
+  rooms.command(room.code, conns[0], { t: 'selectGame', game: gameId });
+  return { rooms, room, conns };
+}
+const totalChips = (room) => Object.values(room.chips).reduce((a, b) => a + b, 0);
+const totalBuyins = (room) => Object.values(room.buyins).reduce((a, b) => a + b, 0);
+function tryCmd(rooms, room, conn, msg) {
+  try { rooms.command(room.code, conn, msg); return true; } catch { return false; }
+}
+
+console.log('Rooms');
+test('rebuy: only when short, fixed amount, tracked in buy-ins', () => {
+  const { rooms, room, conns } = setupRoom('holdem', 2, 1);
+  const [a, b] = conns;
+  const start = room.settings.startingChips;
+  // A full stack can't rebuy, and a client can't pick its own amount.
+  assert.throws(() => rooms.command(room.code, a, { t: 'rebuy', amount: 999999 }), /only rebuy/i);
+  assert.strictEqual(room.chips.p0, start);
+  assert.strictEqual(room.buyins.p0, start);
+  // Once short, one rebuy goes through; a duplicate (double click) does not.
+  room.chips.p0 = 0;
+  rooms.command(room.code, a, { t: 'rebuy', amount: 999999 });
+  assert.strictEqual(room.chips.p0, start);
+  assert.strictEqual(room.buyins.p0, start * 2);
+  assert.throws(() => rooms.command(room.code, a, { t: 'rebuy' }), /only rebuy/i);
+  assert.strictEqual(room.buyins.p0, start * 2);
+  // Net stays honest: chips minus buy-ins.
+  const me = rooms.viewFor(room, 'p0').members.find((m) => m.id === 'p0');
+  assert.strictEqual(me.net, -start);
+  // Bot top-ups: host only, bots only, and only when the bot is short.
+  const bot = [...room.members.values()].find((m) => m.isBot);
+  assert.throws(() => rooms.command(room.code, b, { t: 'botRebuy', id: bot.id }), /host/i);
+  assert.throws(() => rooms.command(room.code, a, { t: 'botRebuy', id: bot.id }), /only rebuy/i);
+  assert.throws(() => rooms.command(room.code, a, { t: 'botRebuy', id: 'p1' }), /no such bot/i);
+  room.chips[bot.id] = 5;
+  rooms.command(room.code, a, { t: 'botRebuy', id: bot.id });
+  assert.strictEqual(room.chips[bot.id], start + 5);
+  assert.throws(() => rooms.command(room.code, a, { t: 'botRebuy', id: bot.id }), /only rebuy/i);
+  // Someone who was removed from the room can't touch the bank.
+  room.chips.p1 = 0;
+  rooms.command(room.code, a, { t: 'kick', id: 'p1' });
+  assert.throws(() => rooms.command(room.code, b, { t: 'rebuy' }), /not in this room/i);
+  assert.strictEqual(room.chips.p1, 0);
+});
+
+test('lobby commands: host-only actions are rejected for guests', () => {
+  const { rooms, room, conns } = setupRoom('spades', 2, 2);
+  const guest = conns[1];
+  for (const msg of [
+    { t: 'selectGame', game: 'hearts' }, { t: 'setOption', key: 'target', value: 100 },
+    { t: 'setStartingChips', value: 1000000 }, { t: 'addBot' }, { t: 'kick', id: 'p0' },
+    { t: 'resetScores' }, { t: 'start' }, { t: 'shuffleSeats' }, { t: 'togglePlaying', id: 'p0' },
+  ]) {
+    const before = JSON.stringify(rooms.viewFor(room, 'p0'));
+    assert.throws(() => rooms.command(room.code, guest, msg), /host/i, msg.t);
+    // Chat aside, nothing visible changed.
+    assert.strictEqual(JSON.stringify(rooms.viewFor(room, 'p0')).replace(/"chat":\[.*?\],"history"/, ''), before.replace(/"chat":\[.*?\],"history"/, ''), msg.t);
+  }
+});
+
+// Throw junk, out-of-turn and duplicate actions at every game while bots play it
+// out. Nothing may crash the room, chips must be conserved, and the game must end.
+const JUNK_TYPES = ['bet', 'call', 'check', 'fold', 'raise', 'allin', 'hit', 'stand', 'double', 'split', 'skip', 'unbet', 'deal', 'next',
+  'draw', 'discard', 'knock', 'gin', 'undercut', 'layoff', 'play', 'pass', 'bid', 'move', 'auto', 'finish', 'undo', 'roll', 'hold', 'score', 'flip', 'ready', 'leave', 'nope', 42, null];
+const JUNK_VALUES = [undefined, null, -1, 0, 1, 2.5, 13, 1e15, NaN, Infinity, '', 'AS', '2C', 'QH', 'TS', 'ZZ', 'stock', 'discard', 'waste',
+  [], {}, ['2C', '3C', '4C'], ['AS', 'AS', 'AS'], { type: 'tableau', index: 3 }, { type: 'foundation' }, 'yahtzee', 'chance', [true, false, true], '__proto__'];
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+function junkAction() {
+  const a = { type: pick(JUNK_TYPES) };
+  for (const k of ['amount', 'value', 'card', 'cards', 'bid', 'from', 'to', 'category', 'held', 'index']) if (Math.random() < 0.3) a[k] = pick(JUNK_VALUES);
+  return a;
+}
+const FUZZ = [['holdem', 3, 2], ['blackjack', 2, 2], ['spades', 2, 2], ['hearts', 2, 2], ['ginrummy', 2, 0], ['war', 2, 0], ['yahtzee', 2, 1], ['solitaire', 1, 0]];
+for (const [gameId, humans, bots] of FUZZ) {
+  test(`fuzz ${GAMES[gameId].meta.name}: junk and out-of-turn actions never corrupt the room`, () => {
+    for (let run = 0; run < 6; run++) {
+      const { rooms, room, conns } = setupRoom(gameId, humans, bots);
+      if (GAMES[gameId].meta.options.some((o) => o.key === 'stake')) rooms.command(room.code, conns[0], { t: 'setOption', key: 'stake', value: 50 });
+      const chipsBefore = totalChips(room) - totalBuyins(room);
+      rooms.command(room.code, conns[0], { t: 'start' });
+      const g = room.game;
+      let steps = 0;
+      while (!g.over && steps++ < 6000) {
+        // Junk from anyone, including spectators and players whose turn it isn't.
+        if (Math.random() < 0.4) {
+          tryCmd(rooms, room, pick(conns), { t: 'act', action: junkAction() });
+          if (Math.random() < 0.05) tryCmd(rooms, room, pick(conns), { t: pick(['act', 'start', 'sitIn', 'rebuy', 'bogus']), action: 'x' });
+        }
+        if (room.game !== g) break;
+        // Every view must still render without leaking an error.
+        for (const id of g.playerIds) assert(!(rooms.viewFor(room, id).game.view || {}).error, `${gameId} view broke`);
+        const waiting = g.module.waitingOn(g.state);
+        if (!waiting.length) {
+          // Continuous games idle between rounds; let a player move them along.
+          const next = gameId === 'holdem' ? null : { type: 'next' };
+          if (next) tryCmd(rooms, room, conns[0], { t: 'act', action: next });
+          if (gameId === 'holdem' && g.state.hand.phase !== 'betting') { const { act } = g.module; try { act(g.state, conns[0].player.id, { type: 'next' }, rooms.ctx(room)); } catch {} }
+          if (!g.module.waitingOn(g.state).length && g.module.meta.continuous && steps > 300) break;
+          if (!g.module.waitingOn(g.state).length && !g.module.meta.continuous) assert.fail(`${gameId} stuck waiting on nobody`);
+          if (g.module.meta.continuous && !g.module.waitingOn(g.state).length) { rooms.endGame(room); break; }
+          continue;
+        }
+        const id = waiting[0];
+        const isBot = !id.startsWith('p');
+        const action = g.module.autoAction(g.state, id, true, rooms.ctx(room)) || g.module.autoAction(g.state, id, false, rooms.ctx(room));
+        if (action) rooms.applyAction(room, id, action);
+        else if (gameId === 'solitaire' && steps > 200) rooms.applyAction(room, id, { type: 'resign' }); // no auto-play; the player gives up
+        // Duplicate delivery of the same move must be rejected or harmless.
+        if (action && !isBot && Math.random() < 0.2) tryCmd(rooms, room, conns.find((c) => c.player.id === id), { t: 'act', action });
+        if (g.module.meta.continuous && steps > 1500) break;
+      }
+      if (room.game) {
+        if (!g.module.meta.continuous) assert(g.over, `${gameId} did not finish`);
+        rooms.endGame(room);
+      }
+      assert.strictEqual(room.game, null);
+      // Blackjack plays against the house, so only the other games must conserve chips (rebuys aside).
+      if (gameId !== 'blackjack') assert.strictEqual(totalChips(room) - totalBuyins(room), chipsBefore, `${gameId} chips not conserved`);
+      for (const v of Object.values(room.chips)) assert(Number.isInteger(v) && v >= 0, `${gameId} bad chip value ${v}`);
+      // The room can start another game straight away.
+      rooms.command(room.code, conns[0], { t: 'start' });
+      assert(room.game && !room.game.over);
+      rooms.endGame(room);
+    }
+  });
+}
+
+test('hidden cards: nobody sees another seated player\'s hand', () => {
+  const handOf = { spades: (s, i) => s.round.hands[i], hearts: (s, i) => s.round.hands[i], ginrummy: (s, i) => s.round.hands[i] };
+  for (const [gameId, humans, bots] of [['spades', 2, 2], ['hearts', 2, 2], ['ginrummy', 2, 0], ['holdem', 3, 0]]) {
+    const { rooms, room, conns } = setupRoom(gameId, humans, bots);
+    rooms.command(room.code, conns[0], { t: 'start' });
+    const g = room.game;
+    for (let step = 0; step < 30 && !g.over; step++) {
+      for (const viewer of g.playerIds) {
+        const json = JSON.stringify(rooms.viewFor(room, viewer).game.view);
+        g.playerIds.forEach((other, i) => {
+          if (other === viewer) return;
+          const cards = gameId === 'holdem'
+            ? (g.state.hand.players.find((p) => p.id === other) || { hole: [] }).hole
+            : handOf[gameId](g.state, i);
+          const resultsShown = gameId === 'holdem' && g.state.hand.results && g.state.hand.results.showdown;
+          const roundOver = g.state.round && g.state.round.phase === 'roundover';
+          if (resultsShown || roundOver) return;
+          // Cards already played face-up to the table are public.
+          const visible = new Set([...(g.state.round ? [...(g.state.round.trick || []).map((t) => t.card || t), ...((g.state.round.discard || []).slice(-1))] : []), ...(g.state.hand ? g.state.hand.board : []),
+            // Cards you passed in Hearts are yours to remember.
+            // A card picked up from the face-up discard pile is public.
+            ...(gameId === 'ginrummy' && g.state.round.lastDraw && g.state.round.lastDraw.from === 'discard' ? [g.state.round.lastDraw.card] : []),
+            ...(gameId === 'hearts' ? (g.state.round.passes[g.playerIds.indexOf(viewer)] || []) : [])]);
+          for (const c of cards) if (!visible.has(c)) assert(!json.includes(`"${c}"`), `${gameId}: ${viewer} can see ${other}'s ${c}`);
+        });
+        // Spectators see no hands at all.
+      }
+      const waiting = g.module.waitingOn(g.state);
+      if (!waiting.length) break;
+      const action = g.module.autoAction(g.state, waiting[0], true, rooms.ctx(room));
+      if (action) rooms.applyAction(room, waiting[0], action);
+    }
+  }
+});
+
+test('leaving a poker or blackjack table lets you sit back in later', () => {
+  for (const gameId of ['holdem', 'blackjack']) {
+    const { rooms, room, conns } = setupRoom(gameId, 3, 0);
+    rooms.command(room.code, conns[0], { t: 'start' });
+    rooms.command(room.code, conns[2], { t: 'act', action: { type: 'leave' } });
+    // Finish whatever round is going so the seat is released.
+    for (let i = 0; i < 50; i++) {
+      const w = room.game.module.waitingOn(room.game.state);
+      if (!w.length) break;
+      rooms.applyAction(room, w[0], room.game.module.autoAction(room.game.state, w[0], true, rooms.ctx(room)));
+    }
+    assert(!room.game.playerIds.includes('p2'), `${gameId}: still listed as playing after leaving`);
+    assert(rooms.viewFor(room, 'p2').game.canSitIn, `${gameId}: no way back to the table`);
+    rooms.command(room.code, conns[2], { t: 'sitIn' });
+    assert(room.game.playerIds.includes('p2'));
+  }
+});
+test('broken saved data is ignored instead of crashing the server', () => {
+  for (const bad of [{ rooms: 'nope' }, { rooms: [null, 5, { code: 'ABCD', members: 'x', chips: 'y' }] }, 'garbage']) {
+    const r = new Rooms({ storage: { load: () => bad, save() {} } });
+    assert(r.rooms instanceof Map);
+  }
+});
+
 console.log(`\n${passed} passed${process.exitCode ? ', some FAILED' : ''}`);

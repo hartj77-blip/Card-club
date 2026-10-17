@@ -245,6 +245,27 @@
     } catch {}
   }
 
+  function showRules(gameId) {
+    const g = S.room && S.room.catalog.find((x) => x.id === gameId);
+    if (!g) return;
+    let dlg = document.getElementById('rules-dialog');
+    if (!dlg) {
+      dlg = document.createElement('dialog');
+      dlg.id = 'rules-dialog';
+      dlg.className = 'rules-dialog';
+      // Tap outside the box to close it.
+      dlg.addEventListener('click', (e) => { if (e.target === dlg || e.target.closest('[data-close]')) dlg.close(); });
+      document.body.appendChild(dlg);
+    }
+    dlg.innerHTML = `
+      <div class="rules-box">
+        <h3>${GAME_SUIT[g.id] || '♠'} How to play ${esc(g.name)}</h3>
+        <ul>${(g.rules || [g.blurb]).map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+        <div class="row" style="justify-content:flex-end"><button class="btn primary" data-close autofocus>Got it</button></div>
+      </div>`;
+    if (dlg.showModal) dlg.showModal(); else dlg.setAttribute('open', '');
+  }
+
   function toast(text, kind = '') {
     const box = document.getElementById('toasts');
     // Don't stack identical messages, and keep at most three on screen.
@@ -351,6 +372,7 @@
           ${S.error && !busy ? `<p class="error-line">${esc(S.error)}</p>` : ''}
           ${P2P && !joining ? '<p class="muted" style="font-size:13px;margin:16px 0 0">Creating a room makes this tab the game host. Keep it open while you play.</p>' : ''}
           <div class="game-list"><span>Texas Hold'em</span><span>Spades</span><span>Gin Rummy</span><span>Blackjack</span><span>Hearts</span><span>Solitaire</span><span>War</span><span>Yahtzee</span></div>
+          <p class="muted" style="font-size:13px;margin:14px 0 0;text-align:center"><a href="https://github.com/hartj77-blip/Card-club/issues/new" target="_blank" rel="noopener" class="muted">Report a bug or suggest a feature</a></p>
         </div>
       </div>`;
     const nameEl = document.getElementById('name');
@@ -522,7 +544,7 @@
 
         <div class="panel start-bar">
           <div>
-            <b>${count} ready</b> <span class="muted">· ${esc(game.name)} needs ${need}</span>
+            <b>${count} ready</b> <span class="muted">· ${esc(game.name)} needs ${need}</span> <button class="btn small ghost" data-a="rules" data-game="${game.id}">How to play</button>
             ${!ok && count < game.minPlayers ? '<div class="muted" style="font-size:13px">Invite friends with the link up top, or add bots.</div>' : ''}
           </div>
           ${host ? `<button class="btn primary big" data-a="start" ${ok ? '' : 'disabled'}>Start ${esc(game.name)}</button>` : '<span class="muted">Waiting for the host to start…</span>'}
@@ -557,6 +579,7 @@
         ${myTurn ? '<span class="turn-pill">Your turn</span>' : waitingNames.length ? `<span class="muted" style="font-size:13px">Waiting on ${waitingNames.slice(0, 3).join(', ')}${waitingNames.length > 3 ? '…' : ''}</span>` : ''}
         ${!playing ? '<span class="tag">Watching</span>' : ''}
         <span class="spacer"></span>
+        <button class="btn small ghost" data-a="rules" data-game="${g.id}">Rules</button>
         ${g.canSitIn && !g.over ? '<button class="btn small primary" data-a="sit-in">Join the table</button>' : ''}
         ${right}
       </div>
@@ -1284,7 +1307,7 @@
       <div class="plist">${items}</div>
       <p class="muted" style="font-size:12px">Net = chips now minus everything bought in. Everyone starts with ${fmt(r.settings.startingChips)}.</p>
       <div class="row">
-        <button class="btn small" data-a="rebuy" data-confirm="Buy in for another ${fmt(r.settings.startingChips)} chips? It counts against your net.">Rebuy ${fmt(r.settings.startingChips)}</button>
+        ${me.canRebuy ? `<button class="btn small" data-a="rebuy" data-confirm="Buy in for another ${fmt(r.settings.startingChips)} chips? It counts against your net.">Rebuy ${fmt(r.settings.startingChips)}</button>` : `<span class="muted" style="font-size:12px">You can rebuy once you're below ${fmt(r.settings.startingChips)} chips.</span>`}
         ${isHost() ? r.members.filter((m) => m.isBot && m.chips < r.settings.startingChips / 4).map((b) => `<button class="btn small ghost" data-a="bot-rebuy" data-id="${b.id}">Top up ${esc(b.name)}</button>`).join('') : ''}
       </div>
       ${me.buyins > r.settings.startingChips ? `<p class="muted" style="font-size:12px">You've bought in ${fmt(me.buyins)} total.</p>` : ''}`;
@@ -1323,11 +1346,16 @@
     switch (a) {
       case 'copy-link': {
         const url = `${location.origin}${location.pathname}?room=${S.room.code}`;
-        (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+        const copy = () => (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
           .then(() => toast('Invite link copied. Send it to your friends!', 'info'))
           .catch(() => prompt('Copy this link:', url));
+        // Phones get the native share sheet (Messages, WhatsApp...); desktops copy the link.
+        if (navigator.share && matchMedia('(pointer: coarse)').matches) {
+          navigator.share({ title: 'Card Club', text: `Join my Card Club room ${S.room.code}`, url }).catch((err) => { if (err && err.name !== 'AbortError') copy(); });
+        } else copy();
         break;
       }
+      case 'rules': showRules(d.game); break;
       case 'reload':
         if (P2P && P2P.isHosting() && S.room && S.room.members.some((m) => !m.isBot && m.connected && m.id !== S.me)
           && !confirm('Reload to get the update? Your room reopens with the same code and chips, and friends reconnect automatically.')) break;

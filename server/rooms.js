@@ -48,21 +48,27 @@ class Rooms {
     try {
       const data = this.storage.load();
       if (!data) return;
-      for (const r of data.rooms || []) {
+      const obj = (x) => (x && typeof x === 'object' && !Array.isArray(x) ? x : {});
+      const nums = (x) => Object.fromEntries(Object.entries(obj(x)).filter(([, v]) => Number.isFinite(v) && v >= 0).map(([k, v]) => [k, Math.floor(v)]));
+      for (const r of Array.isArray(data.rooms) ? data.rooms : []) {
+        // Skip a damaged entry instead of losing every room.
+        if (!r || typeof r.code !== 'string' || !/^[A-Z]{4}$/.test(r.code)) continue;
         const room = this.blankRoom(r.code, r.hostId);
         Object.assign(room, {
-          chips: r.chips || {},
-          buyins: r.buyins || {},
-          history: r.history || [],
-          stats: r.stats || {},
-          chat: r.chat || [],
-          settings: { ...room.settings, ...r.settings },
+          chips: nums(r.chips),
+          buyins: nums(r.buyins),
+          history: Array.isArray(r.history) ? r.history : [],
+          stats: obj(r.stats),
+          chat: Array.isArray(r.chat) ? r.chat : [],
+          settings: { ...room.settings, ...obj(r.settings) },
           gameId: GAMES[r.gameId] ? r.gameId : 'holdem',
-          lastActive: r.lastActive || Date.now(),
+          lastActive: Number(r.lastActive) || Date.now(),
         });
-        for (const id of Object.keys(GAMES)) room.options[id] = { ...room.options[id], ...(r.options || {})[id] };
-        for (const m of r.members || []) {
-          room.members.set(m.id, { id: m.id, name: m.name, isBot: m.isBot, playing: m.playing !== false, sockets: new Set(), disconnectedAt: Date.now() });
+        if (!(room.settings.startingChips >= 10 && room.settings.startingChips <= 1000000)) room.settings.startingChips = 1000;
+        for (const id of Object.keys(GAMES)) room.options[id] = { ...room.options[id], ...obj(obj(r.options)[id]) };
+        for (const m of Array.isArray(r.members) ? r.members : []) {
+          if (!m || typeof m.id !== 'string') continue;
+          room.members.set(m.id, { id: m.id, name: String(m.name || 'Player').slice(0, 20), isBot: !!m.isBot, playing: m.playing !== false, sockets: new Set(), disconnectedAt: Date.now() });
         }
         this.rooms.set(room.code, room);
       }
@@ -236,6 +242,15 @@ class Rooms {
     };
   }
 
+  // A rebuy is only allowed once you're below the starting stack. That keeps
+  // duplicate clicks or scripted messages from piling up chips, and the amount
+  // is always the room's starting stack. Returns the amount.
+  checkRebuy(room, id) {
+    const amount = room.settings.startingChips;
+    if ((room.chips[id] || 0) >= amount) throw new Error(`You can only rebuy when below ${amount} chips`);
+    return amount;
+  }
+
   // --- commands from players -----------------------------------------------------
 
   command(code, ws, msg) {
@@ -317,7 +332,8 @@ class Rooms {
         break;
       }
       case 'rebuy': {
-        const amount = room.settings.startingChips;
+        // The amount always comes from room settings, never the client.
+        const amount = this.checkRebuy(room, me);
         room.chips[me] = (room.chips[me] || 0) + amount;
         room.buyins[me] = (room.buyins[me] || 0) + amount;
         this.system(room, `${member.name} bought in for another ${amount} chips`);
@@ -327,9 +343,10 @@ class Rooms {
         hostOnly();
         const bot = room.members.get(msg.id);
         if (!bot || !bot.isBot) throw new Error('No such bot');
-        const amount = room.settings.startingChips;
+        const amount = this.checkRebuy(room, bot.id);
         room.chips[bot.id] = (room.chips[bot.id] || 0) + amount;
         room.buyins[bot.id] = (room.buyins[bot.id] || 0) + amount;
+        this.system(room, `${bot.name} was topped up with ${amount} chips`);
         break;
       }
       case 'resetScores':
@@ -360,7 +377,13 @@ class Rooms {
         const g = room.game;
         if (!g || g.over) throw new Error('No game running');
         if (!g.playerIds.includes(me)) throw new Error("You're watching this game");
-        this.applyAction(room, me, msg.action || {});
+        const action = msg.action && typeof msg.action === 'object' ? msg.action : {};
+        this.applyAction(room, me, action);
+        // Leaving a poker/blackjack table makes you a spectator who can sit back in.
+        if (action.type === 'leave' && g.module.meta.continuous && room.game === g) {
+          g.playerIds = g.playerIds.filter((x) => x !== me);
+          this.system(room, `${member.name} left the table`);
+        }
         break;
       }
       case 'endGame': {
@@ -551,6 +574,7 @@ class Rooms {
       chips: room.chips[m.id] || 0,
       net: (room.chips[m.id] || 0) - (room.buyins[m.id] || 0),
       buyins: room.buyins[m.id] || 0,
+      canRebuy: (room.chips[m.id] || 0) < room.settings.startingChips,
       inGame: !!(g && g.playerIds.includes(m.id)),
     }));
     let game = null;
