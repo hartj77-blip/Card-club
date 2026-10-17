@@ -7,6 +7,14 @@ const meta = {
   id: 'holdem',
   name: "Texas Hold'em",
   blurb: 'No-limit poker, 2-9 players. Bets come out of your chip stack.',
+  rules: [
+    "Everyone gets 2 private cards. 5 shared cards come out in stages: the flop (3), the turn (1) and the river (1).",
+    "Betting goes around after each stage. Fold, check, call, or raise any amount (no-limit). Bets come straight out of your chip count.",
+    "The two players left of the dealer post the small and big blinds to start the pot.",
+    "Best 5-card hand from your 2 cards plus the 5 shared cards wins. If everyone else folds, you win without showing.",
+    "Hand ranks, high to low: royal flush, straight flush, four of a kind, full house, flush, straight, three of a kind, two pair, pair, high card.",
+    "If you go all-in, side pots are made automatically so you can only win what you matched.",
+  ],
   minPlayers: 2,
   maxPlayers: 9,
   usesChips: true,
@@ -34,7 +42,13 @@ function create(players, options, ctx) {
 }
 
 function addPlayer(s, p) {
-  if (s.seats.some((x) => x.id === p.id)) return;
+  const existing = s.seats.find((x) => x.id === p.id);
+  if (existing) {
+    // Came back before their old seat was cleared: keep it.
+    existing.leaving = false;
+    existing.sittingOut = false;
+    return;
+  }
   if (s.seats.length >= meta.maxPlayers) throw new Error('Table is full');
   s.seats.push({ id: p.id, name: p.name, sittingOut: false, leaving: false });
 }

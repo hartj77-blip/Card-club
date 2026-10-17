@@ -7,6 +7,13 @@ const meta = {
   id: 'solitaire',
   name: 'Solitaire',
   blurb: 'Classic Klondike for one. Everyone else in the room can watch.',
+  rules: [
+    "Klondike. Build four foundation piles, one per suit, from ace up to king.",
+    "On the tableau, stack cards in descending order with alternating colors. Only a king can fill an empty column.",
+    "Tap the stock to draw 1 or 3 cards (set by the host). You can go through the stock as often as you like.",
+    "Tap a card to send it to the best spot automatically. Undo is always available.",
+    "When every card is face up, use Auto-finish. Time and moves go on the scoreboard.",
+  ],
   minPlayers: 1,
   maxPlayers: 1,
   usesChips: false,

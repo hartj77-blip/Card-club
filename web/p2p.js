@@ -375,7 +375,16 @@
     const engine = window.CardClubEngine;
     const rooms = new engine.Rooms({
       storage: {
-        load() { const s = store.get(STORE_KEY); return s ? JSON.parse(s) : null; },
+        load() {
+          const s = store.get(STORE_KEY);
+          if (!s) return null;
+          try { return JSON.parse(s); }
+          catch {
+            // Keep a copy of damaged data rather than overwriting it on the next save.
+            store.set(STORE_KEY + ':corrupt', s);
+            return null;
+          }
+        },
         save(data) { store.set(STORE_KEY, JSON.stringify(data)); },
       },
     });
@@ -530,7 +539,7 @@
   function savedRooms() {
     try {
       const data = JSON.parse(store.get(STORE_KEY) || 'null');
-      return data ? data.rooms.map((r) => r.code) : [];
+      return data && Array.isArray(data.rooms) ? data.rooms.filter((r) => r && typeof r.code === 'string').map((r) => r.code) : [];
     } catch { return []; }
   }
 
