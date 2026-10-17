@@ -372,6 +372,7 @@
           ${S.error && !busy ? `<p class="error-line">${esc(S.error)}</p>` : ''}
           ${P2P && !joining ? '<p class="muted" style="font-size:13px;margin:16px 0 0">Creating a room makes this tab the game host. Keep it open while you play.</p>' : ''}
           <div class="game-list"><span>Texas Hold'em</span><span>Spades</span><span>Gin Rummy</span><span>Blackjack</span><span>Hearts</span><span>Solitaire</span><span>War</span><span>Yahtzee</span></div>
+          <p class="muted" style="font-size:13px;margin:14px 0 0;text-align:center"><a href="https://github.com/hartj77-blip/Card-club/issues/new" target="_blank" rel="noopener" class="muted">Report a bug or suggest a feature</a></p>
         </div>
       </div>`;
     const nameEl = document.getElementById('name');
