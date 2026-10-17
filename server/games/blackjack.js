@@ -6,6 +6,14 @@ const meta = {
   id: 'blackjack',
   name: 'Blackjack',
   blurb: 'Everyone vs. the house, 1-7 players. Bet chips, beat the dealer.',
+  rules: [
+    "Everyone plays against the dealer, not each other. Place a bet, then get 2 cards.",
+    "Get closer to 21 than the dealer without going over. Number cards count their number, face cards 10, aces 1 or 11.",
+    "Hit to take a card, stand to stop. Double: double your bet and take exactly one more card.",
+    "Split a pair into two hands (up to 4). Split aces get one card each.",
+    "Dealer draws until 17 and stands on all 17s.",
+    "A win pays 1:1. Blackjack (ace + 10-value card on the first two) pays 3:2. A tie returns your bet.",
+  ],
   minPlayers: 1,
   maxPlayers: 7,
   usesChips: true,
@@ -46,7 +54,8 @@ function create(players, options) {
 }
 
 function addPlayer(s, p) {
-  if (s.seats.some((x) => x.id === p.id)) return;
+  const existing = s.seats.find((x) => x.id === p.id);
+  if (existing) { existing.leaving = false; return; }
   if (s.seats.length >= meta.maxPlayers) throw new Error('Table is full');
   s.seats.push({ id: p.id, name: p.name, leaving: false });
 }

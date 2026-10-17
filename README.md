@@ -22,13 +22,14 @@ invite link, and everyone plays together in real time on desktop or phone. No si
 
 - **Shared chip bank.** Everyone starts with 1,000 chips (the host can change this). Hold'em
   and Blackjack bet straight from it. Spades and Gin can have an optional chip stake, and the
-  winners split the pot.
+  winners split the pot. You can rebuy (for the starting amount) once you drop below the
+  starting stack; the host can top up bots the same way.
 - **Automatic score keeping.** A leaderboard of wins per player per game, plus a history of
   every finished game or session with its result. Rebuys are tracked, so "net" is honest.
 - **Bots.** The host can add bots to fill seats (say, if only two of you want Spades).
 - **Drop-outs.** Refresh or reconnect and you're back in your seat. If someone disconnects,
   their turn is auto-played after 30 seconds so the game keeps moving.
-- Chat, a "your turn" chime, and a mobile layout.
+- A "How to play" rules sheet for every game, chat, a "your turn" chime, and a mobile layout.
 
 ## Two ways to host it
 
@@ -98,5 +99,8 @@ WebSockets.
 - `public/` is the client: plain HTML, CSS and JS with no build step.
 
 ```bash
-npm test   # rules tests plus thousands of simulated bot hands
+npm test          # rules tests, bot simulations, and room tests that fuzz every game
+                  # with illegal / out-of-turn / duplicate actions
+npm run test:e2e  # two real browser sessions create, join and finish a game
+                  # (needs Playwright: npm i -D playwright && npx playwright install chromium)
 ```

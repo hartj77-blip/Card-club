@@ -8,6 +8,12 @@ const meta = {
   id: 'war',
   name: 'War',
   blurb: '2 players. Flip, compare, go to war on a tie. Has an auto-flip button.',
+  rules: [
+    "The deck is split evenly. Both players flip their top card at the same time; the higher card takes both.",
+    "Aces are high. On a tie it's war: each player puts three cards face down and one face up, and the higher face-up card takes them all.",
+    "If you run out of cards, you lose. If the round limit is reached, whoever has the most cards wins.",
+    "Tick Auto-flip to let the game flip for you.",
+  ],
   minPlayers: 2,
   maxPlayers: 2,
   usesChips: false,

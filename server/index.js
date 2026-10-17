@@ -52,8 +52,17 @@ const DATA_FILE = path.join(DATA_DIR, 'rooms.json');
 const rooms = new Rooms({
   storage: {
     load() {
-      try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); }
+      let text;
+      try { text = fs.readFileSync(DATA_FILE, 'utf8'); }
       catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+      try { return JSON.parse(text); }
+      catch (e) {
+        // Keep the damaged file for recovery instead of overwriting it on the next save.
+        const backup = `${DATA_FILE}.corrupt-${Date.now()}`;
+        fs.renameSync(DATA_FILE, backup);
+        console.error(`rooms.json was unreadable; moved it to ${backup} and started fresh`);
+        return null;
+      }
     },
     save(data) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
