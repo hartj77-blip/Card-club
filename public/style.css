@@ -349,3 +349,11 @@ input:focus { border-color: var(--gold); }
 .toast { background: #2a1416; border: 1px solid #7d2c30; color: #ffd9d9; padding: 10px 14px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.5); animation: deal .2s; }
 .toast.info { background: var(--panel-2); border-color: var(--line); color: var(--ink); }
 .empty-note { text-align: center; padding: 30px 16px; color: var(--muted); }
+
+/* Rules reference */
+.rules-dialog { border: none; padding: 0; background: transparent; max-width: min(560px, calc(100vw - 32px)); width: 100%; }
+.rules-dialog::backdrop { background: rgba(0, 0, 0, .6); }
+.rules-box { background: var(--panel-2); color: var(--ink); border: 1px solid var(--line); border-radius: 14px; padding: 20px 22px; max-height: 80vh; overflow: auto; }
+.rules-box h3 { margin: 0 0 10px; font-family: 'Playfair Display', serif; font-size: 22px; }
+.rules-box ul { margin: 0 0 16px; padding-left: 20px; line-height: 1.5; }
+.rules-box li { margin: 6px 0; }
