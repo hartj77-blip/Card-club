@@ -104,3 +104,7 @@ npm test          # rules tests, bot simulations, and room tests that fuzz every
 npm run test:e2e  # two real browser sessions create, join and finish a game
                   # (needs Playwright: npm i -D playwright && npx playwright install chromium)
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE).
